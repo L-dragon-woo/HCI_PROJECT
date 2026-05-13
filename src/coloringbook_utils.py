@@ -290,7 +290,64 @@ def segment_connected_components(line_image, min_area=120):
     return region_map, regions
 
 
-def assign_region_color_numbers(regions, region_map, label_map, palette=None):
+def estimate_background_labels(label_map, max_labels=1, min_border_fraction=0.15):
+    """Estimate background color labels from the image border.
+
+    The background often appears on the outer border. Using the dominant border
+    label lets us suppress background-colored islands even when they are enclosed
+    between foreground objects and do not touch the image edge.
+    """
+    top = label_map[0, :]
+    bottom = label_map[-1, :]
+    left = label_map[:, 0]
+    right = label_map[:, -1]
+    border_labels = np.concatenate([top, bottom, left, right]).astype(np.int32)
+    counts = np.bincount(border_labels)
+    order = np.argsort(counts)[::-1]
+    total = max(1, border_labels.size)
+    background = []
+    for label in order[:max_labels]:
+        if counts[label] / total >= min_border_fraction:
+            background.append(int(label))
+    return set(background)
+
+
+def estimate_background_color(image, sample_border=12):
+    """Estimate the RGB background color from border pixels.
+
+    A median color is more robust than a mean when small foreground objects touch
+    the border. The result is used to skip regions whose dominant palette color
+    is visually close to the page background, even if K-Means gave it a separate
+    label.
+    """
+    h, w = image.shape[:2]
+    border = max(1, min(sample_border, h // 2, w // 2))
+    samples = np.concatenate([
+        image[:border, :, :].reshape(-1, 3),
+        image[-border:, :, :].reshape(-1, 3),
+        image[:, :border, :].reshape(-1, 3),
+        image[:, -border:, :].reshape(-1, 3),
+    ], axis=0)
+    return np.median(samples, axis=0).astype(np.uint8)
+
+
+def color_distance_lab(color_a, color_b):
+    """Return perceptual-ish distance between two RGB colors in Lab space."""
+    arr = np.array([[color_a, color_b]], dtype=np.uint8)
+    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB).astype(np.float32)[0]
+    return float(np.linalg.norm(lab[0] - lab[1]))
+
+
+def assign_region_color_numbers(
+    regions,
+    region_map,
+    label_map,
+    palette=None,
+    background_labels=None,
+    background_color=None,
+    background_color_threshold=16,
+    merge_background_similar=True,
+):
     """Assign each segmented region the dominant K-Means color number.
 
     Region ids are unique shape ids, but coloring-book numbers should represent
@@ -298,6 +355,14 @@ def assign_region_color_numbers(regions, region_map, label_map, palette=None):
     each region so separated areas with the same dominant color get the same
     printed number.
     """
+    if background_labels is None:
+        background_labels = estimate_background_labels(label_map)
+    background_labels = set(background_labels)
+    background_label = min(background_labels) if background_labels else None
+    if background_color is not None and palette is not None and len(palette) > 0:
+        distances = [color_distance_lab(color, background_color) for color in palette]
+        background_label = int(np.argmin(distances))
+
     updated = []
     for region in regions:
         mask = region_map == region["id"]
@@ -314,8 +379,29 @@ def assign_region_color_numbers(regions, region_map, label_map, palette=None):
             enriched["color_rgb"] = tuple(int(v) for v in palette[color_label])
         else:
             enriched["color_rgb"] = None
+
+        similar_to_background = False
+        background_distance = None
+        if background_color is not None and enriched["color_rgb"] is not None:
+            background_distance = color_distance_lab(enriched["color_rgb"], background_color)
+            similar_to_background = background_distance <= background_color_threshold
+
+        if merge_background_similar and similar_to_background and background_label is not None:
+            color_label = background_label
+            enriched["color_label"] = color_label
+            enriched["color_id"] = color_label + 1
+            if palette is not None and 0 <= color_label < len(palette):
+                enriched["color_rgb"] = tuple(int(v) for v in palette[color_label])
+
+        enriched["background_distance"] = background_distance
+        enriched["is_background"] = color_label in background_labels or similar_to_background
         updated.append(enriched)
     return updated
+
+
+def colorable_regions(regions):
+    """Return regions that receive printed color numbers."""
+    return list(regions)
 
 
 def contour_regions(line_image, min_area=120):
@@ -358,7 +444,7 @@ def watershed_segmentation(image):
     return result, markers
 
 
-def label_regions(line_image, regions, font_scale=0.45):
+def label_regions(line_image, regions, font_scale=0.45, skip_background=False):
     """Insert numbers near region centers while reducing label overlaps."""
     if line_image.ndim == 2:
         canvas = cv2.cvtColor(line_image, cv2.COLOR_GRAY2RGB)
@@ -371,6 +457,8 @@ def label_regions(line_image, regions, font_scale=0.45):
     offsets = [(0, 0), (-12, 0), (12, 0), (0, -12), (0, 12), (-18, -10), (18, 10)]
 
     for region in sorted_regions:
+        if skip_background and region.get("is_background", False):
+            continue
         text = str(region.get("color_id", region["id"]))
         (tw, th), base = cv2.getTextSize(text, font, font_scale, 1)
         cx, cy = region["centroid"]
