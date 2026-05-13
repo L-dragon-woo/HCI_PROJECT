@@ -478,12 +478,9 @@ def label_regions(
         else:
             cx, cy = region["centroid"]
 
-        scale = min(font_scale, max(0.24, min(w, h) / 42.0))
+        scale = font_scale
         thickness = 1
         (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
-        if tw + 4 > w and tw > 0:
-            scale *= max(0.22, (w - 4) / tw)
-            (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
 
         x = int(np.clip(cx - tw / 2, x0 + 1, max(x0 + 1, x0 + w - tw - 1)))
         y = int(np.clip(cy + th / 2, y0 + th + 1, max(y0 + th + 1, y0 + h - 1)))
