@@ -314,6 +314,7 @@ regions = assign_region_color_numbers(
 )
 numbered_regions = colorable_regions(regions)
 region_preview = color_region_preview(region_map)
+color_edge_preview = color_region_edge_preview(line_image, region_map, regions, palette, thickness=4)
 
 # 각 닫힌 영역 내부에서 가장 넓은 지점에 색상 번호를 넣습니다.
 # 예시 이미지처럼 같은 색상 번호가 여러 영역에 반복해서 표시됩니다.
@@ -333,6 +334,7 @@ watershed_preview, watershed_markers = watershed_segmentation(quantized)
 
 save_image_rgb("outputs/03_line_image.png", line_image)
 save_image_rgb("outputs/03_region_preview.png", region_preview)
+save_image_rgb("outputs/03_color_edge_preview.png", color_edge_preview)
 save_image_rgb("outputs/03_numbered_coloringbook.png", numbered)
 save_image_rgb("outputs/03_contour_preview.png", contour_preview)
 save_image_rgb("outputs/03_watershed_preview.png", watershed_preview)
@@ -340,6 +342,7 @@ save_image_rgb("outputs/03_watershed_preview.png", watershed_preview)
 show_images([
     ("Line Image", line_image),
     ("Connected Components Regions", region_preview),
+    ("Color Edge Preview", color_edge_preview),
     ("Contour Detection Preview", contour_preview),
     ("Watershed Preview", watershed_preview),
     ("Numbered Coloring Book", numbered),
@@ -488,6 +491,7 @@ regions = assign_region_color_numbers(
 )
 numbered_regions = colorable_regions(regions)
 region_preview = color_region_preview(region_map)
+color_edge_preview = color_region_edge_preview(canny_line, region_map, regions, kmeans_palette, thickness=4)
 numbered_coloringbook = label_regions(canny_line, regions, font_scale=0.9, region_map=region_map)
 color_index = save_color_index_table(kmeans_palette, "outputs/04_color_index_table.png", regions, "Final Color Index")
 numbered_with_index = combine_with_color_index(
@@ -506,6 +510,7 @@ save_image_rgb("outputs/04_sobel.png", sobel_line)
 save_image_rgb("outputs/04_laplacian.png", lap_line)
 save_image_rgb("outputs/04_canny.png", canny_line)
 save_image_rgb("outputs/04_region_preview.png", region_preview)
+save_image_rgb("outputs/04_color_edge_preview.png", color_edge_preview)
 save_image_rgb("outputs/04_final_numbered_coloringbook.png", numbered_coloringbook)
 
 show_images([
@@ -516,8 +521,9 @@ show_images([
     ("5. Laplacian", lap_line),
     ("6. Hybrid Canny + Color Boundary", canny_line),
     ("7. Segmentation", region_preview),
-    ("8. Final Numbered Coloring Book", numbered_coloringbook),
-    ("9. Color Index Table", color_index),
+    ("8. Color Edge Preview", color_edge_preview),
+    ("9. Final Numbered Coloring Book", numbered_coloringbook),
+    ("10. Color Index Table", color_index),
 ], cols=2, figsize=(13, 15), cmap="gray", save_path="outputs/04_final_results_grid.png")
 """),
         md("""

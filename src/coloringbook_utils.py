@@ -172,6 +172,33 @@ def combine_with_color_index(image, palette, regions=None, save_path=None, title
     return combined
 
 
+def color_region_edge_preview(line_image, region_map, regions, palette=None, thickness=4):
+    """Draw each segmented region boundary with its assigned palette color."""
+    if line_image.ndim == 2:
+        canvas = cv2.cvtColor(line_image, cv2.COLOR_GRAY2RGB)
+    else:
+        canvas = line_image.copy()
+
+    palette = np.asarray(palette, dtype=np.uint8) if palette is not None else None
+    for region in regions:
+        mask = (region_map == region["id"]).astype(np.uint8) * 255
+        if np.count_nonzero(mask) == 0:
+            continue
+
+        color = region.get("color_rgb")
+        color_id = int(region.get("color_id", 0))
+        if color is None and palette is not None and 1 <= color_id <= len(palette):
+            color = tuple(int(v) for v in palette[color_id - 1])
+        if color is None:
+            color = (255, 0, 0)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(canvas, contours, -1, (35, 35, 35), thickness + 2, cv2.LINE_AA)
+        cv2.drawContours(canvas, contours, -1, tuple(int(v) for v in color), thickness, cv2.LINE_AA)
+
+    return canvas
+
+
 def kmeans_quantization(image, k=10, attempts=3):
     """Color quantization using OpenCV K-Means clustering."""
     pixels = image.reshape((-1, 3)).astype(np.float32)
