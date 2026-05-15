@@ -116,6 +116,102 @@ def plot_palette(palette, title="RGB Palette", save_path=None):
     plt.show()
 
 
+def color_index_table_image(palette, regions=None, title="Color Index"):
+    """Create a legend image mapping printed numbers to palette colors."""
+    palette = np.asarray(palette, dtype=np.uint8)
+    counts = {}
+    if regions is not None:
+        for region in regions:
+            color_id = int(region.get("color_id", 0))
+            if color_id > 0:
+                counts[color_id] = counts.get(color_id, 0) + 1
+
+    row_h = 42
+    header_h = 82
+    margin = 18
+    width = 470
+    height = header_h + row_h * len(palette) + margin
+    table = np.full((height, width, 3), 255, dtype=np.uint8)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    cv2.putText(table, title, (18, 32), font, 0.75, (0, 0, 0), 2, cv2.LINE_AA)
+    cv2.putText(table, "No", (18, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "Color", (72, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "RGB", (146, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "HEX", (302, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.putText(table, "Regions", (382, 66), font, 0.48, (40, 40, 40), 1, cv2.LINE_AA)
+    cv2.line(table, (18, 74), (width - 18, 74), (190, 190, 190), 1)
+
+    for i, color in enumerate(palette):
+        color_id = i + 1
+        y0 = header_h + i * row_h
+        y_mid = y0 + 27
+        if i % 2 == 0:
+            table[y0:y0 + row_h, 10:width - 10] = (248, 248, 248)
+
+        rgb = tuple(int(v) for v in color)
+        hex_value = "#{:02X}{:02X}{:02X}".format(*rgb)
+        cv2.putText(table, str(color_id), (20, y_mid), font, 0.58, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.rectangle(table, (76, y0 + 8), (118, y0 + 32), rgb, -1)
+        cv2.rectangle(table, (76, y0 + 8), (118, y0 + 32), (80, 80, 80), 1)
+        cv2.putText(table, str(rgb), (146, y_mid), font, 0.42, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(table, hex_value, (302, y_mid), font, 0.42, (0, 0, 0), 1, cv2.LINE_AA)
+        cv2.putText(table, str(counts.get(color_id, 0)), (405, y_mid), font, 0.48, (0, 0, 0), 1, cv2.LINE_AA)
+
+    return table
+
+
+def save_color_index_table(palette, save_path, regions=None, title="Color Index"):
+    """Save a legend image mapping printed numbers to palette colors."""
+    table = color_index_table_image(palette, regions=regions, title=title)
+    save_image_rgb(save_path, table)
+    return table
+
+
+def combine_with_color_index(image, palette, regions=None, save_path=None, title="Color Index"):
+    """Place a color-index table to the right of a result image."""
+    table = color_index_table_image(palette, regions=regions, title=title)
+    target_h = image.shape[0]
+    scale = target_h / table.shape[0]
+    table_w = max(1, int(table.shape[1] * scale))
+    table = cv2.resize(table, (table_w, target_h), interpolation=cv2.INTER_AREA)
+
+    gutter = 18
+    combined = np.full((target_h, image.shape[1] + gutter + table_w, 3), 255, dtype=np.uint8)
+    combined[:, :image.shape[1]] = image
+    combined[:, image.shape[1] + gutter:] = table
+    if save_path:
+        save_image_rgb(save_path, combined)
+    return combined
+
+
+def color_region_edge_preview(line_image, region_map, regions, palette=None, thickness=4):
+    """Draw each segmented region boundary with its assigned palette color."""
+    if line_image.ndim == 2:
+        canvas = cv2.cvtColor(line_image, cv2.COLOR_GRAY2RGB)
+    else:
+        canvas = line_image.copy()
+
+    palette = np.asarray(palette, dtype=np.uint8) if palette is not None else None
+    for region in regions:
+        mask = (region_map == region["id"]).astype(np.uint8) * 255
+        if np.count_nonzero(mask) == 0:
+            continue
+
+        color = region.get("color_rgb")
+        color_id = int(region.get("color_id", 0))
+        if color is None and palette is not None and 1 <= color_id <= len(palette):
+            color = tuple(int(v) for v in palette[color_id - 1])
+        if color is None:
+            color = (255, 0, 0)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(canvas, contours, -1, (35, 35, 35), thickness + 2, cv2.LINE_AA)
+        cv2.drawContours(canvas, contours, -1, tuple(int(v) for v in color), thickness, cv2.LINE_AA)
+
+    return canvas
+
+
 def kmeans_quantization(image, k=10, attempts=3):
     """Color quantization using OpenCV K-Means clustering."""
     pixels = image.reshape((-1, 3)).astype(np.float32)
@@ -483,7 +579,8 @@ def watershed_segmentation(image):
 def label_regions(
     line_image,
     regions,
-    font_scale=0.45,
+    font_scale=0.9,
+    min_font_scale=0.25,
     skip_background=False,
     region_map=None,
     avoid_overlap=False,
@@ -514,8 +611,14 @@ def label_regions(
         else:
             cx, cy = region["centroid"]
 
-        scale = font_scale
-        thickness = 1
+        scale = _fit_label_font_scale(
+            text,
+            font,
+            region["bbox"],
+            max_scale=font_scale,
+            min_scale=min_font_scale,
+        )
+        thickness = max(1, int(round(scale * 2)))
         (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
 
         x = int(np.clip(cx - tw / 2, x0 + 1, max(x0 + 1, x0 + w - tw - 1)))
@@ -536,6 +639,29 @@ def label_regions(
         occupied.append(box)
         cv2.putText(canvas, text, (x, y), font, scale, (0, 0, 0), thickness, cv2.LINE_AA)
     return canvas
+
+
+def _fit_label_font_scale(text, font, bbox, max_scale=0.9, min_scale=0.25, padding=4):
+    """Choose a text scale that fits inside the region bounding box."""
+    _, _, w, h = bbox
+    available_w = max(1, w - padding * 2)
+    available_h = max(1, h - padding * 2)
+    scale = max_scale
+
+    for _ in range(12):
+        thickness = max(1, int(round(scale * 2)))
+        (tw, th), base = cv2.getTextSize(text, font, scale, thickness)
+        text_h = th + base
+        if tw <= available_w and text_h <= available_h:
+            return max(min_scale, scale)
+
+        width_ratio = available_w / max(1, tw)
+        height_ratio = available_h / max(1, text_h)
+        scale *= min(width_ratio, height_ratio) * 0.95
+        if scale <= min_scale:
+            return min_scale
+
+    return max(min_scale, min(scale, max_scale))
 
 
 def _best_label_point(region_map, region_id, bbox):
