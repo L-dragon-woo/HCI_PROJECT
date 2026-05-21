@@ -27,7 +27,23 @@ function App() {
               afterImage="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop"
             />
 
-            <PhotoInput image={uploadedImage} setImage={setUploadedImage} />
+            <div className="flex flex-col items-center gap-4">
+              <PhotoInput image={uploadedImage} setImage={setUploadedImage} />
+
+              <div className="flex items-center gap-4">
+                <input
+                  type="number"
+                  className="w-[150px] flex-1 [appearance:textfield] rounded-lg bg-white px-6 py-4 text-center text-base font-medium text-gray-900 shadow-2xl outline-none placeholder:text-gray-300 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  placeholder="색 개수 입력"
+                />
+
+                <button className="cursor-pointer rounded-lg bg-gray-900 px-8 py-4 text-gray-50 shadow-2xl">
+                  <span className="text-base font-medium break-keep text-gray-50">
+                    변환
+                  </span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
