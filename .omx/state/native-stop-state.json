@@ -1,0 +1,24 @@
+{
+  "sessions": {
+    "019e48cb-5356-7391-a7f8-8bf14f80845e": {
+      "ordinary_no_progress_guard": {
+        "fingerprint": "ordinary|?�녕! 반�??�요. 무엇??같이 ?�볼까요? 코드 ?�보�? ?�정 ?�인, 버그 ?�기, ?�이?�어 ?�리까�? ?�하�??�져주세??",
+        "first_seen_at": "2026-05-21T04:29:19.115Z",
+        "last_seen_at": "2026-05-21T04:29:19.115Z",
+        "repeat_count": 1,
+        "last_turn_id": "019e48cb-5834-7783-8ea2-d06f56d554e5",
+        "last_thread_id": null
+      }
+    },
+    "019e48cb-5867-7060-aaac-c1e8760d46dc": {
+      "ordinary_no_progress_guard": {
+        "fingerprint": "ordinary|{\"title\":\"?�사?�기\"}",
+        "first_seen_at": "2026-05-21T04:29:21.511Z",
+        "last_seen_at": "2026-05-21T04:29:21.511Z",
+        "repeat_count": 1,
+        "last_turn_id": "019e48cb-5890-7623-a238-94671f792c24",
+        "last_thread_id": null
+      }
+    }
+  }
+}
