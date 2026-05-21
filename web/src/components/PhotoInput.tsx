@@ -26,7 +26,7 @@ const PhotoInput = ({ image, setImage }: PhotoInputProps) => {
 
   return (
     <div
-      className="relative flex aspect-4/3 w-full max-w-4xl cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-4 border-dashed border-gray-100 bg-white shadow-xl transition-all hover:ring-4 hover:ring-blue-500/30"
+      className="relative flex aspect-4/3 w-full max-w-4xl cursor-pointer items-center justify-center overflow-hidden rounded-2xl border-4 border-dashed border-gray-100 bg-white shadow-2xl transition-all hover:ring-4 hover:ring-blue-500/30"
       onClick={triggerFileInput}
     >
       {image ? (
