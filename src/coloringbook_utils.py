@@ -9,23 +9,22 @@ import numpy as np
 
 OUTPUT_DIR = "outputs"
 DATA_DIR = "data"
-MIN_COLOR_COUNT = 5
 DEFAULT_COLOR_COUNT = 10
 
 
-def validate_color_count(k, min_k=MIN_COLOR_COUNT):
-    """Return a valid color count for coloring-book generation.
+def validate_color_count(k, min_k=2):
+    """Return a valid color count for quantization experiments.
 
-    K below 5 makes most photos collapse into broad light/dark regions rather
-    than recognizable paint-by-number areas, so every quantization path shares
-    the same lower bound.
+    The final UI can recommend an image-specific minimum K, but the low-level
+    quantization functions should still allow small K values so notebooks can
+    measure when an image starts to become recognizable.
     """
     try:
         k = int(k)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"K must be an integer color count, got {k!r}") from exc
     if k < min_k:
-        raise ValueError(f"K must be at least {min_k} for a usable coloring-book result.")
+        raise ValueError(f"K must be at least {min_k}.")
     return k
 
 
@@ -891,7 +890,7 @@ def region_metrics(regions, image_shape, small_area=300):
     }
 
 
-def complexity_by_k(image, k_values=(MIN_COLOR_COUNT, DEFAULT_COLOR_COUNT, 20), min_area=120):
+def complexity_by_k(image, k_values=(5, DEFAULT_COLOR_COUNT, 20), min_area=120):
     """Measure how color count changes runtime, edge density, and region complexity."""
     rows = []
     for k in k_values:
