@@ -31,5 +31,10 @@ ENV/
 *.log
 *.tmp
 
+# Backend runtime artifacts
+server/uploads/
+server/generated/
+server/generated_test/
+
 # Codex / OMX local runtime state
 .omx/
