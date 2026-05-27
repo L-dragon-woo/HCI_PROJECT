@@ -44,6 +44,9 @@ SEGMENTATION_EDGE_THICKNESS = 2
 SEGMENTATION_LINE_COLOR = (0, 0, 0)
 DETAIL_LINE_GRAY = 0
 MIN_REGION_AREA = 160
+DETAIL_RENDER_MIN_AREA = 2
+DETAIL_RENDER_MIN_ARC_LENGTH = 6
+DETAIL_RENDER_MIN_POINTS = 3
 
 DETAIL_CANNY_LOW = 90
 DETAIL_CANNY_HIGH = 200
@@ -243,9 +246,18 @@ def draw_paint_by_number_style(detail_edges, regions, region_map, min_region_are
     draw_simplified_boundary_layer(canvas, region_map)
 
     detail = clean_edges(detail_edges, open_iter=0, close_iter=0, thickness=1)
-    detail_contours, _ = cv2.findContours(detail, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+    detail_contours, _ = cv2.findContours(detail, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_KCOS)
     for contour in detail_contours:
-        if cv2.contourArea(contour) >= 2:
+        contour_area = cv2.contourArea(contour)
+        arc_length = cv2.arcLength(contour, False)
+        has_visible_stroke = (
+            contour_area >= DETAIL_RENDER_MIN_AREA
+            or (
+                len(contour) >= DETAIL_RENDER_MIN_POINTS
+                and arc_length >= DETAIL_RENDER_MIN_ARC_LENGTH
+            )
+        )
+        if has_visible_stroke:
             cv2.drawContours(
                 canvas,
                 [contour],
