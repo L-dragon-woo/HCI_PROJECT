@@ -77,12 +77,158 @@ SEGMENTATION_CLOSED_DETAIL_MAX_SPAN = 220
 SEGMENTATION_CLOSED_DETAIL_MIN_EXTENT = 0.06
 SEGMENTATION_CLOSED_DETAIL_CLOSE_KERNEL = 5
 
+AUTO_MIN_WORKING_LONG_EDGE = 1100
+AUTO_DEFAULT_WORKING_LONG_EDGE = 1800
+AUTO_MAX_WORKING_LONG_EDGE = 2400
+AUTO_HIGH_DETAIL_EDGE_DENSITY = 0.075
+AUTO_LOW_DETAIL_EDGE_DENSITY = 0.028
+AUTO_BLUR_VARIANCE_THRESHOLD = 85.0
 
-def load_image_preserve_size(path):
+
+def resize_to_long_edge(image, target_long_edge):
+    if target_long_edge is None or target_long_edge <= 0:
+        return image, 1.0
+    h, w = image.shape[:2]
+    long_edge = max(h, w)
+    if long_edge == int(target_long_edge):
+        return image, 1.0
+    scale = float(target_long_edge) / float(long_edge)
+    interpolation = cv2.INTER_CUBIC if scale > 1.0 else cv2.INTER_AREA
+    resized = cv2.resize(
+        image,
+        (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+        interpolation=interpolation,
+    )
+    return resized, scale
+
+
+def analyze_image_profile(image, max_sample_long_edge=900):
+    h, w = image.shape[:2]
+    long_edge = max(h, w)
+    sample, sample_scale = resize_to_long_edge(
+        image,
+        min(long_edge, max_sample_long_edge),
+    )
+    gray = cv2.cvtColor(sample, cv2.COLOR_RGB2GRAY)
+    lab = cv2.cvtColor(sample, cv2.COLOR_RGB2LAB)
+    edges = cv2.Canny(gray, 70, 160)
+    for channel in cv2.split(lab):
+        edges = cv2.bitwise_or(edges, cv2.Canny(channel, 70, 160))
+
+    edge_density_value = float(np.count_nonzero(edges)) / float(edges.size)
+    blur_variance = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    lab_pixels = lab.reshape(-1, 3).astype(np.float32)
+    if len(lab_pixels) > 30000:
+        rng = np.random.default_rng(11)
+        lab_pixels = lab_pixels[rng.choice(len(lab_pixels), 30000, replace=False)]
+    lab_spread = float(np.mean(np.linalg.norm(lab_pixels - lab_pixels.mean(axis=0), axis=1)))
+
+    return {
+        "original_width": int(w),
+        "original_height": int(h),
+        "original_long_edge": int(long_edge),
+        "sample_scale": float(sample_scale),
+        "edge_density": edge_density_value,
+        "blur_variance": blur_variance,
+        "lab_spread": lab_spread,
+    }
+
+
+def choose_processing_policy(profile, requested_max_size=None):
+    original_long_edge = int(profile["original_long_edge"])
+    edge_density_value = float(profile["edge_density"])
+    blur_variance = float(profile["blur_variance"])
+    is_small_source = original_long_edge < AUTO_MIN_WORKING_LONG_EDGE
+    is_high_detail = edge_density_value >= AUTO_HIGH_DETAIL_EDGE_DENSITY
+    is_low_detail = edge_density_value <= AUTO_LOW_DETAIL_EDGE_DENSITY
+    is_blurry = blur_variance < AUTO_BLUR_VARIANCE_THRESHOLD
+
+    if requested_max_size is not None and requested_max_size > 0:
+        target_long_edge = min(original_long_edge, int(requested_max_size))
+    elif is_small_source:
+        target_long_edge = AUTO_MIN_WORKING_LONG_EDGE
+    elif is_high_detail:
+        target_long_edge = min(original_long_edge, AUTO_MAX_WORKING_LONG_EDGE)
+    elif is_low_detail or is_blurry:
+        target_long_edge = min(original_long_edge, AUTO_DEFAULT_WORKING_LONG_EDGE)
+    else:
+        target_long_edge = min(original_long_edge, AUTO_MAX_WORKING_LONG_EDGE)
+
+    if target_long_edge < AUTO_MIN_WORKING_LONG_EDGE and is_small_source:
+        target_long_edge = AUTO_MIN_WORKING_LONG_EDGE
+
+    detail_boost = "high" if (is_small_source or is_high_detail) else "normal"
+    if is_blurry and not is_high_detail:
+        detail_boost = "soft"
+
+    source_low = SEGMENTATION_DETAIL_CANNY_LOW
+    source_high = SEGMENTATION_DETAIL_CANNY_HIGH
+    closed_low = SEGMENTATION_CLOSED_DETAIL_LOW
+    closed_high = SEGMENTATION_CLOSED_DETAIL_HIGH
+    connect_kernel = SEGMENTATION_CONNECT_KERNEL
+    connect_iter = SEGMENTATION_CONNECT_ITER
+
+    if detail_boost == "high":
+        source_low = 28
+        source_high = 82
+        closed_low = 38
+        closed_high = 112
+        connect_kernel = 5
+        connect_iter = 1
+    elif detail_boost == "soft":
+        source_low = 42
+        source_high = 115
+        closed_low = 52
+        closed_high = 145
+        connect_kernel = 5
+        connect_iter = 1
+
+    return {
+        "target_long_edge": int(target_long_edge),
+        "detail_boost": detail_boost,
+        "source_detail_low": int(source_low),
+        "source_detail_high": int(source_high),
+        "closed_detail_low": int(closed_low),
+        "closed_detail_high": int(closed_high),
+        "connect_kernel": int(connect_kernel),
+        "connect_iter": int(connect_iter),
+    }
+
+
+def load_image_preserve_size(path, max_size=None, auto_policy=True):
     bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
     if bgr is None:
         raise FileNotFoundError(f"Image not found or unsupported: {path}")
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    original = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    profile = analyze_image_profile(original)
+    if auto_policy:
+        policy = choose_processing_policy(profile)
+        if max_size is not None:
+            policy["target_long_edge"] = min(int(policy["target_long_edge"]), int(max_size))
+            if profile["original_long_edge"] < AUTO_MIN_WORKING_LONG_EDGE:
+                policy["target_long_edge"] = max(
+                    int(policy["target_long_edge"]),
+                    AUTO_MIN_WORKING_LONG_EDGE,
+                )
+    else:
+        target_long_edge = profile["original_long_edge"]
+        if max_size is not None:
+            target_long_edge = min(target_long_edge, int(max_size))
+        policy = {
+            "target_long_edge": int(target_long_edge),
+            "detail_boost": "fixed",
+            "source_detail_low": SEGMENTATION_DETAIL_CANNY_LOW,
+            "source_detail_high": SEGMENTATION_DETAIL_CANNY_HIGH,
+            "closed_detail_low": SEGMENTATION_CLOSED_DETAIL_LOW,
+            "closed_detail_high": SEGMENTATION_CLOSED_DETAIL_HIGH,
+            "connect_kernel": SEGMENTATION_CONNECT_KERNEL,
+            "connect_iter": SEGMENTATION_CONNECT_ITER,
+        }
+    image, scale = resize_to_long_edge(original, policy["target_long_edge"])
+    profile["working_width"] = int(image.shape[1])
+    profile["working_height"] = int(image.shape[0])
+    profile["working_scale"] = float(scale)
+    return image, profile, policy
 
 
 def smooth_before_kmeans(image):
@@ -473,7 +619,8 @@ def draw_segmentation_filled_preview(segmentation_edges, regions, region_map, la
     return canvas
 
 
-def render_difficulty(image, simplified, target_k):
+def render_difficulty(image, simplified, target_k, policy=None):
+    policy = policy or {}
     area_scale = max(1.0, float(SEGMENTATION_OUTPUT_SCALE) ** 2)
     object_min_area = int(round(OBJECT_MIN_AREA * area_scale))
     min_region_area = int(round(MIN_REGION_AREA * area_scale))
@@ -494,7 +641,12 @@ def render_difficulty(image, simplified, target_k):
         (up_labels.shape[1], up_labels.shape[0]),
         interpolation=cv2.INTER_CUBIC,
     )
-    source_boundary_edges = source_detail_boundary_edges(up_simplified, object_raw)
+    source_boundary_edges = source_detail_boundary_edges(
+        up_simplified,
+        object_raw,
+        low=policy.get("source_detail_low", SEGMENTATION_DETAIL_CANNY_LOW),
+        high=policy.get("source_detail_high", SEGMENTATION_DETAIL_CANNY_HIGH),
+    )
     dark_region_edges = dark_detail_region_edges(
         up_image,
         min_area=int(round(SEGMENTATION_DARK_REGION_MIN_AREA * area_scale)),
@@ -503,6 +655,8 @@ def render_difficulty(image, simplified, target_k):
     closed_detail_edges = closed_detail_shape_edges(
         up_image,
         object_raw,
+        low=policy.get("closed_detail_low", SEGMENTATION_CLOSED_DETAIL_LOW),
+        high=policy.get("closed_detail_high", SEGMENTATION_CLOSED_DETAIL_HIGH),
         min_pixels=int(round(SEGMENTATION_CLOSED_DETAIL_MIN_PIXELS * area_scale)),
         max_pixels=int(round(SEGMENTATION_CLOSED_DETAIL_MAX_PIXELS * area_scale)),
         min_contour_area=SEGMENTATION_CLOSED_DETAIL_MIN_CONTOUR_AREA * area_scale,
@@ -515,8 +669,8 @@ def render_difficulty(image, simplified, target_k):
     )
     object_seg_connected = connect_segmentation_edges(
         segmentation_source_edges,
-        kernel_size=SEGMENTATION_CONNECT_KERNEL,
-        iterations=SEGMENTATION_CONNECT_ITER,
+        kernel_size=policy.get("connect_kernel", SEGMENTATION_CONNECT_KERNEL),
+        iterations=policy.get("connect_iter", SEGMENTATION_CONNECT_ITER),
     )
     object_seg_clean = clean_edges(
         object_seg_connected,
@@ -574,7 +728,7 @@ def render_difficulty(image, simplified, target_k):
     return result, filled_preview, metrics
 
 
-def run_batch(data_dir, output_dir):
+def run_batch(data_dir, output_dir, max_size=None, auto_policy=True):
     data_dir = Path(data_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -588,13 +742,28 @@ def run_batch(data_dir, output_dir):
     summary_rows = []
     for image_path in image_paths:
         start = time.perf_counter()
-        image = load_image_preserve_size(image_path)
+        image, profile, policy = load_image_preserve_size(
+            image_path,
+            max_size=max_size,
+            auto_policy=auto_policy,
+        )
         simplified = smooth_before_kmeans(image)
         min_k, _ = estimate_min_k_from_smoothed_colors(simplified)
         k_values = difficulty_k_values(min_k)
-        print(f"[{image_path.name}] minK={min_k}, K={k_values}", flush=True)
+        print(
+            (
+                f"[{image_path.name}] "
+                f"original={profile['original_width']}x{profile['original_height']} "
+                f"working={profile['working_width']}x{profile['working_height']} "
+                f"edge_density={profile['edge_density']:.4f} "
+                f"blur={profile['blur_variance']:.1f} "
+                f"policy={policy['detail_boost']} "
+                f"minK={min_k}, K={k_values}"
+            ),
+            flush=True,
+        )
         for difficulty, target_k in k_values.items():
-            result, filled_preview, metrics = render_difficulty(image, simplified, target_k)
+            result, filled_preview, metrics = render_difficulty(image, simplified, target_k, policy=policy)
             output_path = output_dir / f"{image_path.stem}_{difficulty}_k{target_k}.png"
             save_image_rgb(str(output_path), result)
             filled_output_path = output_dir / f"{image_path.stem}_{difficulty}_k{target_k}_segmentation_filled.png"
@@ -606,12 +775,26 @@ def run_batch(data_dir, output_dir):
                 "regions": metrics["regions"],
                 "small_regions": metrics["small_regions"],
                 "edge_density": f"{metrics['edge_density']:.4f}",
+                "original_size": f"{profile['original_width']}x{profile['original_height']}",
+                "working_size": f"{profile['working_width']}x{profile['working_height']}",
+                "policy": policy["detail_boost"],
                 "output": output_path.name,
             })
         print(f"  done in {time.perf_counter() - start:.1f}s", flush=True)
 
     summary_path = output_dir / "batch_difficulty_summary.csv"
-    columns = ["image", "difficulty", "K", "regions", "small_regions", "edge_density", "output"]
+    columns = [
+        "image",
+        "difficulty",
+        "K",
+        "regions",
+        "small_regions",
+        "edge_density",
+        "original_size",
+        "working_size",
+        "policy",
+        "output",
+    ]
     with summary_path.open("w", encoding="utf-8") as f:
         f.write(",".join(columns) + "\n")
         for row in summary_rows:
@@ -623,8 +806,24 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default=str(ROOT / "data"))
     parser.add_argument("--output-dir", default=str(ROOT / "outputs"))
+    parser.add_argument(
+        "--max-size",
+        type=int,
+        default=None,
+        help="Optional upper bound for the working long edge. Auto policy still upscales small sources.",
+    )
+    parser.add_argument(
+        "--no-auto-policy",
+        action="store_true",
+        help="Disable image-profile-based policy selection and only apply --max-size if provided.",
+    )
     args = parser.parse_args()
-    summary_path = run_batch(args.data_dir, args.output_dir)
+    summary_path = run_batch(
+        args.data_dir,
+        args.output_dir,
+        max_size=args.max_size,
+        auto_policy=not args.no_auto_policy,
+    )
     print(f"summary: {summary_path}")
 
 
