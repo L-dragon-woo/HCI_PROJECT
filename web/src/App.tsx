@@ -5,6 +5,8 @@ import ImageComparison from './components/ImageComparison'
 import PhotoInput from './components/PhotoInput'
 import DifficultyDropdown from './components/DifficultyDropdown'
 import { ChevronDown } from 'lucide-react'
+import beforeImage from './images/beforeImage.png'
+import afterImage from './images/afterImage.png'
 
 function App() {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null)
@@ -14,7 +16,7 @@ function App() {
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
       <Header />
-      <main className="container mx-auto flex-grow pt-20 pb-30">
+      <main className="container mx-auto flex-grow pt-20">
         <div className="flex w-full flex-col items-center gap-16 px-8 py-16">
           <div className="flex flex-col items-center gap-8">
             <p className="text-center text-6xl font-bold break-keep text-gray-900">
@@ -28,8 +30,8 @@ function App() {
 
           <div className="grid w-full grid-cols-1 gap-8 lg:grid-cols-2">
             <ImageComparison
-              beforeImage="https://images.unsplash.com/photo-1541963463532-d68292c34b19?q=80&w=1000&auto=format&fit=crop"
-              afterImage="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop"
+              beforeImage={beforeImage}
+              afterImage={afterImage}
             />
 
             <div className="flex flex-col items-center gap-4">
