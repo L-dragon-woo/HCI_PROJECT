@@ -53,6 +53,10 @@ NUMBER_FONT_MAX_SCALE = 0.90
 NUMBER_FONT_MIN_SCALE = 0.10
 NUMBER_FONT_PADDING = 1
 NUMBER_FONT_SCALE_MULTIPLIER = 1.25
+LABEL_ISLAND_CLEANUP_ENABLED = True
+LABEL_ISLAND_MIN_AREA = 36
+LABEL_ISLAND_FORCE_MERGE_AREA = 10
+LABEL_ISLAND_MAX_COLOR_DISTANCE = 85.0
 
 DETAIL_CANNY_LOW = 90
 DETAIL_CANNY_HIGH = 200
@@ -354,6 +358,47 @@ def merge_background_similar_labels(labels, palette, image, distance_threshold):
     merged_palette = palette.copy()
     merged_palette[background_label] = np.clip(background_color, 0, 255).astype(np.uint8)
     return merged_labels, merged_palette
+
+
+def absorb_tiny_label_islands(labels, palette):
+    # Remove tiny isolated K-Means label islands before edge extraction. This
+    # prevents a few pixels of quantization noise from becoming colorable regions.
+    if not LABEL_ISLAND_CLEANUP_ENABLED:
+        return labels
+
+    cleaned = labels.copy().astype(np.int32)
+    palette_float = palette.astype(np.float32)
+    kernel = np.ones((3, 3), np.uint8)
+
+    for label_id in np.unique(labels):
+        source_mask = (cleaned == int(label_id)).astype(np.uint8)
+        n_components, components, stats, _ = cv2.connectedComponentsWithStats(source_mask, 8)
+        for component_id in range(1, n_components):
+            area = int(stats[component_id, cv2.CC_STAT_AREA])
+            if area >= LABEL_ISLAND_MIN_AREA:
+                continue
+
+            component = components == component_id
+            border = cv2.dilate(component.astype(np.uint8), kernel, iterations=1).astype(bool) & ~component
+            neighbor_labels = cleaned[border]
+            neighbor_labels = neighbor_labels[neighbor_labels != int(label_id)]
+            if neighbor_labels.size == 0:
+                continue
+
+            counts = np.bincount(neighbor_labels.astype(np.int32), minlength=len(palette))
+            candidates = []
+            for neighbor_id in np.flatnonzero(counts):
+                if neighbor_id >= len(palette):
+                    continue
+                distance = float(np.linalg.norm(palette_float[int(label_id)] - palette_float[int(neighbor_id)]))
+                if area <= LABEL_ISLAND_FORCE_MERGE_AREA or distance <= LABEL_ISLAND_MAX_COLOR_DISTANCE:
+                    candidates.append((int(counts[neighbor_id]), -distance, int(neighbor_id)))
+
+            if candidates:
+                _, _, target_label = max(candidates)
+                cleaned[component] = target_label
+
+    return cleaned
 
 
 def object_first_edges(label_map, min_area, close_kernel=5):
@@ -729,6 +774,8 @@ def render_difficulty(image, simplified, target_k, policy=None):
             AUTO_SIMPLE_BACKGROUND_MERGE_DISTANCE,
         )
         kmeans_img = palette[labels]
+    labels = absorb_tiny_label_islands(labels, palette)
+    kmeans_img = palette[labels]
     up_image, up_kmeans, up_labels = upscale_for_segmentation_output(
         image,
         kmeans_img,
