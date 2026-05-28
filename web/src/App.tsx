@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Header from './components/Header'
+import Footer from './components/Footer'
 import ImageComparison from './components/ImageComparison'
 import PhotoInput from './components/PhotoInput'
 import DifficultyDropdown from './components/DifficultyDropdown'
@@ -11,9 +12,9 @@ function App() {
   const difficulties = ['쉬움', '보통', '어려움']
 
   return (
-    <div className="h-full min-h-screen max-w-full min-w-fit bg-gray-50">
+    <div className="flex min-h-screen flex-col bg-gray-50">
       <Header />
-      <div className="container mx-auto pt-20">
+      <main className="container mx-auto flex-grow pt-20 pb-30">
         <div className="flex w-full flex-col items-center gap-16 px-8 py-16">
           <div className="flex flex-col items-center gap-8">
             <p className="text-center text-6xl font-bold break-keep text-gray-900">
@@ -59,7 +60,8 @@ function App() {
             </div>
           </div>
         </div>
-      </div>
+      </main>
+      <Footer />
     </div>
   )
 }
