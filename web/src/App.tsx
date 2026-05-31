@@ -183,7 +183,7 @@ function App() {
               {
                 step: '02',
                 title: '난이도 선택',
-                description: '원하는 색상 수와 난이도를 선택합니다.',
+                description: '원하는 난이도(색상 수)를 선택합니다.',
               },
               {
                 step: '03',
